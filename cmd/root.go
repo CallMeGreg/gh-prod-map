@@ -46,6 +46,7 @@ func _root() error {
 
 	RootCmd.AddCommand(orgsCmd)
 	RootCmd.AddCommand(reposCmd)
+	RootCmd.AddCommand(prodMapCmd)
 
 	return RootCmd.Execute()
 }
