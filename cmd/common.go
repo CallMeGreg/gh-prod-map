@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/pterm/pterm"
@@ -24,6 +26,70 @@ func NewGraphQLClient(hostname string) (*api.GraphQLClient, error) {
 // NewGraphQLClient whenever the GraphQL API can return the same data.
 func NewRESTClient(hostname string) (*api.RESTClient, error) {
 	return api.NewRESTClient(api.ClientOptions{Host: hostname})
+}
+
+// DoGraphQLWithRateLimitRetry executes a GraphQL query and retries on primary
+// rate-limit errors by waiting until reset time from the rate-limit endpoint.
+func DoGraphQLWithRateLimitRetry(client interface {
+	Do(string, map[string]interface{}, interface{}) error
+}, hostname, query string, variables map[string]interface{}, out interface{}) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := client.Do(query, variables, out); err != nil {
+			lastErr = err
+			if !isRateLimitError(err) {
+				return err
+			}
+			waitFor, waitErr := waitForPrimaryRateLimitReset(hostname)
+			if waitErr != nil {
+				return fmt.Errorf("graphql rate limit exceeded and reset wait failed: %w", waitErr)
+			}
+			PrintWarning("GraphQL rate limit exceeded. Waiting %s before retrying...", waitFor.Round(time.Second))
+			time.Sleep(waitFor)
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("graphql rate limit retries exhausted: %w", lastErr)
+}
+
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "rate limit") || strings.Contains(message, "secondary rate limit")
+}
+
+func waitForPrimaryRateLimitReset(hostname string) (time.Duration, error) {
+	client, err := NewRESTClient(hostname)
+	if err != nil {
+		return 0, fmt.Errorf("creating REST client for rate-limit check: %w", err)
+	}
+
+	var response struct {
+		Resources struct {
+			GraphQL struct {
+				Remaining int   `json:"remaining"`
+				Reset     int64 `json:"reset"`
+			} `json:"graphql"`
+		} `json:"resources"`
+	}
+
+	if err := client.Get("rate_limit", &response); err != nil {
+		return 0, fmt.Errorf("querying REST rate-limit endpoint: %w", err)
+	}
+
+	if response.Resources.GraphQL.Remaining > 0 {
+		return time.Second, nil
+	}
+
+	resetAt := time.Unix(response.Resources.GraphQL.Reset, 0)
+	waitFor := time.Until(resetAt) + time.Second
+	if waitFor < time.Second {
+		waitFor = time.Second
+	}
+	return waitFor, nil
 }
 
 // -----------------------------------------------------------------------------
@@ -144,7 +210,7 @@ func ListEnterpriseOrganizations(enterprise, hostname string, limit int) ([]Orga
 			}
 		}
 
-		if err := client.Do(query, variables, &response); err != nil {
+		if err := DoGraphQLWithRateLimitRetry(client, hostname, query, variables, &response); err != nil {
 			spinner.Fail(fmt.Sprintf("Failed to fetch organizations for enterprise: %s", enterprise))
 			return nil, err
 		}
@@ -235,9 +301,9 @@ func ListOrganizationRepositories(org, hostname string, limit int) ([]Repository
 				Repositories struct {
 					TotalCount int
 					Nodes      []struct {
-						Name           string
-						Visibility     string
-						StargazerCount int
+						Name            string
+						Visibility      string
+						StargazerCount  int
 						PrimaryLanguage struct {
 							Name string
 						}
@@ -250,7 +316,7 @@ func ListOrganizationRepositories(org, hostname string, limit int) ([]Repository
 			}
 		}
 
-		if err := client.Do(query, variables, &response); err != nil {
+		if err := DoGraphQLWithRateLimitRetry(client, hostname, query, variables, &response); err != nil {
 			if progress != nil {
 				progress.Stop()
 			}

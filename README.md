@@ -1,6 +1,6 @@
 # gh-extension-template
 
-A template repository for building **precompiled [GitHub CLI](https://cli.github.com) extensions in Go**.
+A **precompiled [GitHub CLI](https://cli.github.com) extension in Go** that maps production-maintenance patterns across repositories.
 
 It is scaffolded with `gh extension create --precompiled=go` and wired up with a preferred, opinionated set of libraries:
 
@@ -11,7 +11,7 @@ It is scaffolded with `gh extension create --precompiled=go` and wired up with a
 | GitHub API calls (GraphQL preferred) | [cli/go-gh](https://github.com/cli/go-gh) |
 | Demo recordings | [charmbracelet/vhs](https://github.com/charmbracelet/vhs) |
 
-Two example subcommands (`orgs` and `repos`) are included so you can see the whole stack working end to end. Replace them with your own.
+The extension includes repository discovery commands (`orgs`, `repos`) plus a production mapping command (`prod-map`).
 
 ![demo](demo/demo.gif)
 
@@ -82,6 +82,22 @@ gh-webhook              | PUBLIC     | Go       | 42
 go-gh                   | PUBLIC     | Go       | 435
 ```
 
+### Detect production patterns across repositories
+
+```sh
+gh extension-template prod-map --org cli --repo-limit 200 --csv-out prod-map-report.csv
+gh extension-template prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai
+```
+
+`prod-map` collects per-repository signals:
+- default branch name
+- pull request target branch frequency
+- tags
+- releases
+
+It prints summary statistics with progress feedback and writes a detailed CSV report.  
+Use `--ai` to run optional Copilot SDK post-processing that buckets similar production patterns.
+
 ### Global flags
 
 | Flag | Alias | Default | Description |
@@ -100,7 +116,8 @@ go-gh                   | PUBLIC     | Go       | 435
 │   ├── root.go            # Root command + persistent flags
 │   ├── common.go          # Reusable go-gh clients, pterm helpers, GraphQL queries
 │   ├── orgs.go            # `orgs` subcommand
-│   └── repos.go           # `repos` subcommand
+│   ├── repos.go           # `repos` subcommand
+│   └── prod_map.go        # `prod-map` subcommand
 ├── demo/
 │   └── demo.tape          # VHS script for the README demo
 ├── .github/
