@@ -15,9 +15,9 @@ var reposCmd = &cobra.Command{
 This command prefers the GraphQL API (via cli/go-gh) over REST because
 GraphQL can return the repository name, visibility, primary language, and
 star count in a single request.`,
-	Example: `  gh extension-template repos --org github
-  gh extension-template repos --org github --limit 50
-  gh extension-template repos --org github --hostname github.example.com`,
+	Example: `  gh prod-map repos --org github
+  gh prod-map repos --org github --limit 50
+  gh prod-map repos --org github --hostname github.example.com`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runRepos()
 	},

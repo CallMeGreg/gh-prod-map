@@ -1,4 +1,4 @@
-module github.com/CallMeGreg/gh-extension-template
+module github.com/CallMeGreg/gh-prod-map
 
 go 1.25.0
 

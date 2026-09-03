@@ -15,19 +15,18 @@ var (
 	limit_flag      int
 )
 
-// RootCmd is the base command for the extension. Rename the Use field and the
-// module path in go.mod when you fork this template.
+// RootCmd is the base command for the prod-map extension.
 var RootCmd = &cobra.Command{
-	Use:   "extension-template <subcommand> [flags]",
-	Short: "A template for building precompiled gh CLI extensions in Go",
-	Long: `A template for building precompiled gh CLI extensions in Go.
+	Use:   "prod-map <subcommand> [flags]",
+	Short: "Map production maintenance patterns across GitHub repositories",
+	Long: `prod-map inspects default branches, pull request target branches, tags,
+and releases across an organization or enterprise, classifies each repository
+into a production-maintenance pattern, and writes a detailed CSV report.
 
-It wires together the libraries the GitHub CLI ecosystem uses:
+It is built with:
   - spf13/cobra   for subcommands and flags
   - pterm/pterm   for terminal UI (spinners, progress bars, tables)
-  - cli/go-gh     for GitHub API calls (GraphQL preferred)
-
-Replace the example "orgs" and "repos" subcommands with your own.`,
+  - cli/go-gh     for GitHub API calls (GraphQL preferred)`,
 	// pterm renders errors below; let cobra stay quiet so they are not printed twice.
 	SilenceErrors: true,
 	SilenceUsage:  true,
@@ -41,7 +40,7 @@ func _root() error {
 	RootCmd.PersistentFlags().StringVarP(&hostname_flag, "hostname", "u", "github.com", "GitHub host (e.g., github.example.com for GitHub Enterprise Server)")
 	RootCmd.PersistentFlags().IntVarP(&limit_flag, "limit", "L", 30, "Maximum number of results to fetch")
 
-	// The two example commands are scoped to one of these, never both.
+	// Commands are scoped to one of these, never both.
 	RootCmd.MarkFlagsMutuallyExclusive("enterprise", "org")
 
 	RootCmd.AddCommand(orgsCmd)

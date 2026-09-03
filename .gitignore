@@ -17,6 +17,6 @@
 # Go workspace file
 go.work
 
-# Executable (rename these when you rename the extension)
-/gh-extension-template
-/gh-extension-template.exe
+# Executable
+/gh-prod-map
+/gh-prod-map.exe

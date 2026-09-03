@@ -8,6 +8,6 @@
 
 ## Reporting a Vulnerability
 
-If you notice a security vulnerability with this project, please [open up a new private vulnerability report](https://github.com/CallMeGreg/gh-extension-template/security/advisories/new).
+If you notice a security vulnerability with this project, please [open up a new private vulnerability report](https://github.com/CallMeGreg/gh-prod-map/security/advisories/new).
 
 I will respond at my earliest convenience, and open up a public security advisory after triaging the concern.

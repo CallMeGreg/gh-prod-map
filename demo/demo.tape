@@ -1,8 +1,8 @@
-# VHS tape for the gh-extension-template demo.
+# VHS tape for the gh-prod-map demo.
 #
 # Prerequisites:
-#   - Build and install the extension locally so `gh extension-template` resolves:
-#       go build -o gh-extension-template .
+#   - Build and install the extension locally so `gh prod-map` resolves:
+#       go build -o gh-prod-map .
 #       gh extension install .
 #   - Install VHS: https://github.com/charmbracelet/vhs
 #
@@ -26,12 +26,12 @@ Type "clear"
 Enter
 Show
 
-Type "gh extension-template --help"
+Type "gh prod-map --help"
 Sleep 750ms
 Enter
 Sleep 4s
 
-Type "gh extension-template repos --org cli --limit 5"
+Type "gh prod-map repos --org cli --limit 5"
 Sleep 750ms
 Enter
 Sleep 6s
