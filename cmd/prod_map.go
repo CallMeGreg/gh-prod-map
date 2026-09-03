@@ -59,8 +59,8 @@ var prodMapCmd = &cobra.Command{
 	Long: `Scans repositories in an organization or enterprise and detects likely
 production maintenance patterns using default branches, PR base branches, tags,
 and releases.`,
-	Example: `  gh extension-template prod-map --org github --repo-limit 200 --csv-out prod-map.csv
-  gh extension-template prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai`,
+	Example: `  gh prod-map prod-map --org github --repo-limit 200 --csv-out prod-map.csv
+  gh prod-map prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runProdMap()
 	},

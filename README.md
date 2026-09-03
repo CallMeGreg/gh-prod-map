@@ -1,74 +1,145 @@
-# gh-extension-template
+# gh-prod-map
 
-A **precompiled [GitHub CLI](https://cli.github.com) extension in Go** that maps production-maintenance patterns across repositories.
-
-It is scaffolded with `gh extension create --precompiled=go` and wired up with a preferred, opinionated set of libraries:
+A precompiled [GitHub CLI](https://cli.github.com) extension, written in Go, that maps how teams
+manage production across many repositories. It inspects default branches, pull request target
+branches, tags, and releases, then classifies each repository into a production-maintenance pattern
+and writes a detailed report.
 
 | Concern | Library |
 | ------- | ------- |
 | Subcommands & flags | [spf13/cobra](https://github.com/spf13/cobra) |
 | Terminal UI (spinners, progress bars, tables) | [pterm/pterm](https://github.com/pterm/pterm) |
 | GitHub API calls (GraphQL preferred) | [cli/go-gh](https://github.com/cli/go-gh) |
+| Optional AI summaries | [github/copilot-sdk](https://github.com/github/copilot-sdk) |
 | Demo recordings | [charmbracelet/vhs](https://github.com/charmbracelet/vhs) |
-
-The extension includes repository discovery commands (`orgs`, `repos`) plus a production mapping command (`prod-map`).
 
 ![demo](demo/demo.gif)
 
-## Use this template
-
-Click **Use this template** on GitHub, or create a repo from the CLI:
-
-```sh
-gh repo create <owner>/gh-my-extension --template CallMeGreg/gh-extension-template --private --clone
-```
-
-### Rename the placeholders
-
-After creating your repository, replace the template name in a few places:
-
-1. `go.mod` — the module path `github.com/CallMeGreg/gh-extension-template`
-2. `main.go` — the `cmd` import path
-3. `cmd/root.go` — the `Use:` field on `RootCmd`
-4. `.gitignore` — the `/gh-extension-template` binary entries
-5. `demo/demo.tape` — the `gh extension-template` invocations and the `Output` path
-6. `SECURITY.md` and `.github/CODEOWNERS` — the owner/repo references
-
-A find/replace of `extension-template` (and the `CallMeGreg` owner) covers the code; then swap the example `orgs`/`repos` commands for your own.
-
 ## Prerequisites
 
-- [Go](https://go.dev/dl/) — see the version pinned in `go.mod`
 - [GitHub CLI](https://cli.github.com) (`gh`), authenticated with `gh auth login`
+- [Go](https://go.dev/dl/) — only needed to build from source (see the version pinned in `go.mod`)
 
-## Build and run locally
+## Installation
 
 ```sh
-go build -o gh-extension-template .
+gh extension install CallMeGreg/gh-prod-map
+```
+
+Or build and install from source:
+
+```sh
+git clone https://github.com/CallMeGreg/gh-prod-map.git
+cd gh-prod-map
+go build -o gh-prod-map .
 gh extension install .
-gh extension-template --help
 ```
 
-While iterating you can also run without installing:
+Then confirm it resolves:
 
 ```sh
-go run . repos --org cli --limit 5
+gh prod-map --help
 ```
 
-## Example commands
+## Commands
 
-### List the organizations in an enterprise (GraphQL)
+The extension exposes three subcommands:
+
+| Command | Description |
+| ------- | ----------- |
+| `prod-map` | Detect production branch/tag/release patterns across repositories |
+| `repos` | List the repositories in an organization |
+| `orgs` | List the organizations in an enterprise |
+
+Scope every command to exactly one of `--org` or `--enterprise` (they are mutually exclusive).
+
+> The extension is installed as `gh-prod-map` and invoked as `gh prod-map`. Because the
+> pattern-detection subcommand is also named `prod-map`, you run it as `gh prod-map prod-map`.
+
+### Global flags
+
+| Flag | Alias | Default | Description |
+| ---- | ----- | ------- | ----------- |
+| `--enterprise` | `-e` | | GitHub Enterprise slug (mutually exclusive with `--org`) |
+| `--org` | `-o` | | GitHub organization login (mutually exclusive with `--enterprise`) |
+| `--hostname` | `-u` | `github.com` | GitHub host (e.g. `github.example.com` for GitHub Enterprise Server) |
+| `--limit` | `-L` | `30` | Maximum number of results to fetch (used by `orgs` and `repos`) |
+
+### `prod-map` — detect production patterns
+
+For every repository in an organization or enterprise, `prod-map` collects:
+
+- the default branch
+- the most common pull request target (base) branch
+- tag count and recent tags
+- release count and the latest release
+
+It classifies each repository into a production pattern, prints summary tables with progress
+feedback, and writes a detailed CSV report.
 
 ```sh
-gh extension-template orgs --enterprise <enterprise-slug>
+# One organization, capped at 200 repos, custom CSV path
+gh prod-map prod-map --org github --repo-limit 200 --csv-out prod-map.csv
+
+# An entire enterprise (all orgs, all repos) with optional AI theme analysis
+gh prod-map prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai
 ```
 
-Listing the organizations in an enterprise is only supported by the GraphQL API, so this command always uses GraphQL.
+Example output:
 
-### List the repositories in an organization (GraphQL)
+```
+ SUCCESS  Scanned repositories: 200
+
+Production Pattern     | Repositories
+release-driven         | 84
+trunk-driven           | 61
+tag-driven             | 29
+stabilization-branch   | 18
+insufficient-signals   | 8
+
+Default Branch | Repositories
+main           | 173
+master         | 21
+develop        | 6
+
+ SUCCESS  Wrote CSV report: prod-map.csv
+```
+
+Each repository is classified as:
+
+| Pattern | Meaning |
+| ------- | ------- |
+| `release-driven` | The repository publishes GitHub releases |
+| `tag-driven` | The repository has tags but no releases |
+| `trunk-driven` | Most pull requests target the default branch |
+| `stabilization-branch` | Most pull requests target a non-default branch |
+| `insufficient-signals` | No branches, tags, or releases to classify |
+
+The CSV report (`--csv-out`, default `prod-map-report.csv`) has one row per repository with the full
+signal breakdown: owner, repository, default branch, top PR target branch and count, sampled pull
+requests, tag and release totals, recent tags, latest release details, and the production pattern.
+
+Pass `--ai` to run optional [Copilot SDK](https://github.com/github/copilot-sdk) post-processing that
+buckets similar patterns into themes. If the SDK is unavailable, `prod-map` falls back to a local
+heuristic summary.
+
+#### `prod-map` flags
+
+| Flag | Default | Description |
+| ---- | ------- | ----------- |
+| `--repo-limit` | `0` | Maximum repositories to scan (`0` = all discovered) |
+| `--org-limit` | `0` | Maximum organizations to scan with `--enterprise` (`0` = all) |
+| `--pr-limit` | `200` | Maximum pull requests to sample per repository |
+| `--tag-limit` | `20` | Maximum recent tags to include in report details |
+| `--release-limit` | `20` | Maximum recent releases to include in report details |
+| `--csv-out` | `prod-map-report.csv` | CSV report path (empty string disables the report) |
+| `--ai` | `false` | Run optional Copilot SDK analysis of pattern themes |
+| `--ai-model` | `gpt-5-mini` | Model used for the optional Copilot SDK analysis |
+
+### `repos` — list an organization's repositories
 
 ```sh
-gh extension-template repos --org cli --limit 5
+gh prod-map repos --org cli --limit 5
 ```
 
 ```
@@ -82,56 +153,14 @@ gh-webhook              | PUBLIC     | Go       | 42
 go-gh                   | PUBLIC     | Go       | 435
 ```
 
-### Detect production patterns across repositories
+### `orgs` — list an enterprise's organizations
+
+Listing the organizations in an enterprise is only supported by the GraphQL API, so this command
+always uses GraphQL.
 
 ```sh
-gh extension-template prod-map --org cli --repo-limit 200 --csv-out prod-map-report.csv
-gh extension-template prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai
-```
-
-`prod-map` collects per-repository signals:
-- default branch name
-- pull request target branch frequency
-- tags
-- releases
-
-It prints summary statistics with progress feedback and writes a detailed CSV report.  
-Use `--ai` to run optional Copilot SDK post-processing that buckets similar production patterns.
-
-### Global flags
-
-| Flag | Alias | Default | Description |
-| ---- | ----- | ------- | ----------- |
-| `--enterprise` | `-e` | | GitHub Enterprise slug (mutually exclusive with `--org`) |
-| `--org` | `-o` | | GitHub organization login (mutually exclusive with `--enterprise`) |
-| `--hostname` | `-u` | `github.com` | GitHub host (e.g. `github.example.com` for GitHub Enterprise Server) |
-| `--limit` | `-L` | `30` | Maximum number of results to fetch |
-
-## Project structure
-
-```
-.
-├── main.go                # Entry point; calls cmd.Root()
-├── cmd/
-│   ├── root.go            # Root command + persistent flags
-│   ├── common.go          # Reusable go-gh clients, pterm helpers, GraphQL queries
-│   ├── orgs.go            # `orgs` subcommand
-│   ├── repos.go           # `repos` subcommand
-│   └── prod_map.go        # `prod-map` subcommand
-├── demo/
-│   └── demo.tape          # VHS script for the README demo
-├── .github/
-│   ├── workflows/
-│   │   ├── release.yml            # Auto-versioned precompiled releases
-│   │   └── dependency-review.yml  # Blocks vulnerable dependencies on PRs
-│   ├── instructions/              # Language-specific guidance for Copilot
-│   ├── copilot-instructions.md    # Repo-wide guidance for Copilot
-│   ├── dependabot.yml             # Weekly GitHub Actions updates
-│   ├── pull_request_template.md   # Drives the release type
-│   └── CODEOWNERS
-├── SECURITY.md
-├── LICENSE
-└── go.mod
+gh prod-map orgs --enterprise github
+gh prod-map orgs --enterprise github --limit 100 --hostname github.example.com
 ```
 
 ## API usage philosophy
@@ -139,31 +168,47 @@ Use `--ai` to run optional Copilot SDK post-processing that buckets similar prod
 - Every GitHub API call goes through [cli/go-gh](https://github.com/cli/go-gh).
 - **Prefer the GraphQL API over REST** whenever both expose the same data.
 - Listing the organizations in an enterprise **always uses GraphQL** (REST cannot do it).
-- Both a GraphQL and a REST client helper live in `cmd/common.go`; commands pass the `--hostname` value so they work against GitHub.com and GitHub Enterprise Server.
+- Commands pass the `--hostname` value into the client so they work against GitHub.com and GitHub
+  Enterprise Server.
+- GraphQL calls retry automatically on primary rate-limit errors, waiting until the limit resets.
 
-## Recording demos with VHS
+Reusable go-gh clients and pterm helpers live in [`cmd/common.go`](cmd/common.go).
 
-The demo GIF is generated from [`demo/demo.tape`](demo/demo.tape) with [VHS](https://github.com/charmbracelet/vhs):
+## Project structure
+
+```
+.
+├── main.go              # Entry point; calls cmd.Root()
+├── cmd/
+│   ├── root.go          # Root command + persistent flags
+│   ├── common.go        # go-gh clients, pterm helpers, shared GraphQL queries
+│   ├── orgs.go          # `orgs` subcommand
+│   ├── repos.go         # `repos` subcommand
+│   └── prod_map.go      # `prod-map` subcommand
+└── demo/
+    └── demo.tape        # VHS script for the demo GIF
+```
+
+## Recording the demo
+
+The demo GIF is generated from [`demo/demo.tape`](demo/demo.tape) with
+[VHS](https://github.com/charmbracelet/vhs):
 
 ```sh
-go build -o gh-extension-template .
+go build -o gh-prod-map .
 gh extension install .
 vhs demo/demo.tape
 ```
-
-Edit the tape to script whatever commands best show off your extension.
 
 ## Releasing
 
 Releases are automated by [`.github/workflows/release.yml`](.github/workflows/release.yml):
 
-1. Open a PR and check a box in the **Release Type** section of the PR description (Major / Minor / Patch).
-2. When the PR merges to `main`, the workflow reads that box, computes the next semantic version, tags it, and runs [`cli/gh-extension-precompile`](https://github.com/cli/gh-extension-precompile) to build cross-platform binaries with build provenance attestations.
+1. Open a PR and check a box in the **Release Type** section (Major / Minor / Patch).
+2. When the PR merges to `main`, the workflow reads that box, computes the next semantic version,
+   tags it, and runs [`cli/gh-extension-precompile`](https://github.com/cli/gh-extension-precompile)
+   to build cross-platform binaries with build provenance attestations.
 3. Dependabot PRs default to a patch release.
-
-> **Note:** The first push to `main` (creating the repo from this template) has no PR, so it defaults to a patch release and cuts `v0.0.1` automatically.
-
-Users can then install your extension with `gh extension install <owner>/gh-my-extension`.
 
 ## License
 
