@@ -5,20 +5,11 @@ manage production code across many repositories. It inspects default branches, p
 branches, tags, and releases, then classifies each repository into a production-maintenance pattern
 and writes a detailed report.
 
-| Concern | Library |
-| ------- | ------- |
-| Subcommands & flags | [spf13/cobra](https://github.com/spf13/cobra) |
-| Terminal UI (spinners, progress bars, tables) | [pterm/pterm](https://github.com/pterm/pterm) |
-| GitHub API calls (GraphQL preferred) | [cli/go-gh](https://github.com/cli/go-gh) |
-| Optional AI summaries | [github/copilot-sdk](https://github.com/github/copilot-sdk) |
-| Demo recordings | [charmbracelet/vhs](https://github.com/charmbracelet/vhs) |
-
 ![demo](demo/demo.gif)
 
 ## Prerequisites
 
 - [GitHub CLI](https://cli.github.com) (`gh`), authenticated with `gh auth login`
-- [Go](https://go.dev/dl/) — only needed to build from source (see the version pinned in `go.mod`)
 
 ## Installation
 
@@ -26,25 +17,10 @@ and writes a detailed report.
 gh extension install CallMeGreg/gh-prod-map
 ```
 
-Or build and install from source:
-
-```sh
-git clone https://github.com/CallMeGreg/gh-prod-map.git
-cd gh-prod-map
-go build -o gh-prod-map .
-gh extension install .
-```
-
-Then confirm it resolves:
-
-```sh
-gh prod-map --help
-```
-
 ## Usage
 
 `gh prod-map` scans a single repository, an organization, or an entire enterprise and
-classifies how each repository is maintained for production. Scope every run to exactly one of
+classifies how each repository appears to maintain production code. Scope every run to exactly one of
 `--repo`, `--org`, or `--enterprise` (they are mutually exclusive).
 
 ```sh
@@ -57,9 +33,6 @@ gh prod-map --org github --repo-limit 200 --csv-out prod-map.csv
 # An entire enterprise (all orgs, all repos) with optional AI theme analysis
 gh prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai
 ```
-
-> The extension is installed as `gh-prod-map` and invoked as `gh prod-map`. There are no
-> subcommands — the scope flags select what to scan.
 
 ### Scope flags
 
@@ -136,7 +109,7 @@ heuristic summary.
 ## API usage philosophy
 
 - Every GitHub API call goes through [cli/go-gh](https://github.com/cli/go-gh).
-- **Prefer the GraphQL API over REST** whenever both expose the same data.
+- **Prefer the GraphQL API over REST** whenever both expose the same data to avoid rate limits and improve speed.
 - Listing the organizations in an enterprise **always uses GraphQL** (REST cannot do it).
 - Commands pass the `--hostname` value into the client so they work against GitHub.com and GitHub
   Enterprise Server.
@@ -156,27 +129,6 @@ Reusable go-gh clients and pterm helpers live in [`cmd/common.go`](cmd/common.go
 └── demo/
     └── demo.tape        # VHS script for the demo GIF
 ```
-
-## Recording the demo
-
-The demo GIF is generated from [`demo/demo.tape`](demo/demo.tape) with
-[VHS](https://github.com/charmbracelet/vhs):
-
-```sh
-go build -o gh-prod-map .
-gh extension install .
-vhs demo/demo.tape
-```
-
-## Releasing
-
-Releases are automated by [`.github/workflows/release.yml`](.github/workflows/release.yml):
-
-1. Open a PR and check a box in the **Release Type** section (Major / Minor / Patch).
-2. When the PR merges to `main`, the workflow reads that box, computes the next semantic version,
-   tags it, and runs [`cli/gh-extension-precompile`](https://github.com/cli/gh-extension-precompile)
-   to build cross-platform binaries with build provenance attestations.
-3. Dependabot PRs default to a patch release.
 
 ## License
 
