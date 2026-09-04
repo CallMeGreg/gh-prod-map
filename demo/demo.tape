@@ -31,7 +31,7 @@ Sleep 750ms
 Enter
 Sleep 4s
 
-Type "gh prod-map repos --org cli --limit 5"
+Type "gh prod-map --repo cli/cli"
 Sleep 750ms
 Enter
 Sleep 6s

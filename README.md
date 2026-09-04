@@ -41,33 +41,38 @@ Then confirm it resolves:
 gh prod-map --help
 ```
 
-## Commands
+## Usage
 
-The extension exposes three subcommands:
+`gh prod-map` scans a single repository, an organization, or an entire enterprise and
+classifies how each repository is maintained for production. Scope every run to exactly one of
+`--repo`, `--org`, or `--enterprise` (they are mutually exclusive).
 
-| Command | Description |
-| ------- | ----------- |
-| `prod-map` | Detect production branch/tag/release patterns across repositories |
-| `repos` | List the repositories in an organization |
-| `orgs` | List the organizations in an enterprise |
+```sh
+# A single repository
+gh prod-map --repo github/docs
 
-Scope every command to exactly one of `--org` or `--enterprise` (they are mutually exclusive).
+# One organization, capped at 200 repos, custom CSV path
+gh prod-map --org github --repo-limit 200 --csv-out prod-map.csv
 
-> The extension is installed as `gh-prod-map` and invoked as `gh prod-map`. Because the
-> pattern-detection subcommand is also named `prod-map`, you run it as `gh prod-map prod-map`.
+# An entire enterprise (all orgs, all repos) with optional AI theme analysis
+gh prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai
+```
 
-### Global flags
+> The extension is installed as `gh-prod-map` and invoked as `gh prod-map`. There are no
+> subcommands — the scope flags select what to scan.
+
+### Scope flags
 
 | Flag | Alias | Default | Description |
 | ---- | ----- | ------- | ----------- |
-| `--enterprise` | `-e` | | GitHub Enterprise slug (mutually exclusive with `--org`) |
-| `--org` | `-o` | | GitHub organization login (mutually exclusive with `--enterprise`) |
+| `--repo` | `-r` | | GitHub repository as `owner/name` (mutually exclusive with `--org` / `--enterprise`) |
+| `--org` | `-o` | | GitHub organization login (mutually exclusive with `--repo` / `--enterprise`) |
+| `--enterprise` | `-e` | | GitHub Enterprise slug (mutually exclusive with `--repo` / `--org`) |
 | `--hostname` | `-u` | `github.com` | GitHub host (e.g. `github.example.com` for GitHub Enterprise Server) |
-| `--limit` | `-L` | `30` | Maximum number of results to fetch (used by `orgs` and `repos`) |
 
-### `prod-map` — detect production patterns
+### What it collects
 
-For every repository in an organization or enterprise, `prod-map` collects:
+For every repository in scope, `prod-map` collects:
 
 - the default branch
 - the most common pull request target (base) branch
@@ -76,14 +81,6 @@ For every repository in an organization or enterprise, `prod-map` collects:
 
 It classifies each repository into a production pattern, prints summary tables with progress
 feedback, and writes a detailed CSV report.
-
-```sh
-# One organization, capped at 200 repos, custom CSV path
-gh prod-map prod-map --org github --repo-limit 200 --csv-out prod-map.csv
-
-# An entire enterprise (all orgs, all repos) with optional AI theme analysis
-gh prod-map prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai
-```
 
 Example output:
 
@@ -123,11 +120,11 @@ Pass `--ai` to run optional [Copilot SDK](https://github.com/github/copilot-sdk)
 buckets similar patterns into themes. If the SDK is unavailable, `prod-map` falls back to a local
 heuristic summary.
 
-#### `prod-map` flags
+#### Report flags
 
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
-| `--repo-limit` | `0` | Maximum repositories to scan (`0` = all discovered) |
+| `--repo-limit` | `0` | Maximum repositories to scan with `--org` or `--enterprise` (`0` = all discovered) |
 | `--org-limit` | `0` | Maximum organizations to scan with `--enterprise` (`0` = all) |
 | `--pr-limit` | `200` | Maximum pull requests to sample per repository |
 | `--tag-limit` | `20` | Maximum recent tags to include in report details |
@@ -135,33 +132,6 @@ heuristic summary.
 | `--csv-out` | `prod-map-report.csv` | CSV report path (empty string disables the report) |
 | `--ai` | `false` | Run optional Copilot SDK analysis of pattern themes |
 | `--ai-model` | `gpt-5-mini` | Model used for the optional Copilot SDK analysis |
-
-### `repos` — list an organization's repositories
-
-```sh
-gh prod-map repos --org cli --limit 5
-```
-
-```
- INFO  Repositories in organization "cli": 5
-
-Name                    | Visibility | Language | Stars
-browser                 | PUBLIC     | Go       | 98
-cli                     | PUBLIC     | Go       | 46042
-gh-extension-precompile | PUBLIC     | Shell    | 128
-gh-webhook              | PUBLIC     | Go       | 42
-go-gh                   | PUBLIC     | Go       | 435
-```
-
-### `orgs` — list an enterprise's organizations
-
-Listing the organizations in an enterprise is only supported by the GraphQL API, so this command
-always uses GraphQL.
-
-```sh
-gh prod-map orgs --enterprise github
-gh prod-map orgs --enterprise github --limit 100 --hostname github.example.com
-```
 
 ## API usage philosophy
 
@@ -180,11 +150,9 @@ Reusable go-gh clients and pterm helpers live in [`cmd/common.go`](cmd/common.go
 .
 ├── main.go              # Entry point; calls cmd.Root()
 ├── cmd/
-│   ├── root.go          # Root command + persistent flags
+│   ├── root.go          # Core command, scope flags, error rendering
 │   ├── common.go        # go-gh clients, pterm helpers, shared GraphQL queries
-│   ├── orgs.go          # `orgs` subcommand
-│   ├── repos.go         # `repos` subcommand
-│   └── prod_map.go      # `prod-map` subcommand
+│   └── prod_map.go      # Pattern detection, discovery, CSV + AI output
 └── demo/
     └── demo.tape        # VHS script for the demo GIF
 ```

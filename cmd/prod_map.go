@@ -53,36 +53,22 @@ type repoProductionSignals struct {
 	TargetBranchCounts map[string]int
 }
 
-var prodMapCmd = &cobra.Command{
-	Use:   "prod-map",
-	Short: "Detect production branch/tag/release patterns",
-	Long: `Scans repositories in an organization or enterprise and detects likely
-production maintenance patterns using default branches, PR base branches, tags,
-and releases.`,
-	Example: `  gh prod-map prod-map --org github --repo-limit 200 --csv-out prod-map.csv
-  gh prod-map prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runProdMap()
-	},
-}
-
-func init() {
-	prodMapCmd.Flags().IntVar(&repoLimitFlag, "repo-limit", 0, "Maximum repositories to scan (0 means all discovered repos)")
-	prodMapCmd.Flags().IntVar(&orgLimitFlag, "org-limit", 0, "Maximum organizations to scan when using --enterprise (0 means all discovered organizations)")
-	prodMapCmd.Flags().IntVar(&prLimitFlag, "pr-limit", 200, "Maximum pull requests to sample per repository")
-	prodMapCmd.Flags().IntVar(&tagLimitFlag, "tag-limit", 20, "Maximum recent tags to include in report details")
-	prodMapCmd.Flags().IntVar(&releaseLimitFlag, "release-limit", 20, "Maximum recent releases to include in report details")
-	prodMapCmd.Flags().StringVar(&csvOutFlag, "csv-out", "prod-map-report.csv", "Write a detailed CSV report to this path (set empty string to disable)")
-	prodMapCmd.Flags().BoolVar(&aiFlag, "ai", false, "Run optional Copilot SDK analysis to summarize production-pattern themes")
-	prodMapCmd.Flags().StringVar(&aiModelFlag, "ai-model", "gpt-5-mini", "Model used for optional Copilot SDK analysis")
+// registerProdMapFlags attaches the pattern-detection flags to the given
+// command. The core command owns them because prod-map has no subcommands.
+func registerProdMapFlags(cmd *cobra.Command) {
+	cmd.Flags().IntVar(&repoLimitFlag, "repo-limit", 0, "Maximum repositories to scan when using --org or --enterprise (0 means all discovered repos)")
+	cmd.Flags().IntVar(&orgLimitFlag, "org-limit", 0, "Maximum organizations to scan when using --enterprise (0 means all discovered organizations)")
+	cmd.Flags().IntVar(&prLimitFlag, "pr-limit", 200, "Maximum pull requests to sample per repository")
+	cmd.Flags().IntVar(&tagLimitFlag, "tag-limit", 20, "Maximum recent tags to include in report details")
+	cmd.Flags().IntVar(&releaseLimitFlag, "release-limit", 20, "Maximum recent releases to include in report details")
+	cmd.Flags().StringVar(&csvOutFlag, "csv-out", "prod-map-report.csv", "Write a detailed CSV report to this path (set empty string to disable)")
+	cmd.Flags().BoolVar(&aiFlag, "ai", false, "Run optional Copilot SDK analysis to summarize production-pattern themes")
+	cmd.Flags().StringVar(&aiModelFlag, "ai-model", "gpt-5-mini", "Model used for optional Copilot SDK analysis")
 }
 
 func runProdMap() error {
-	if err := ValidateScope(org_flag, enterprise_flag); err != nil {
-		return fmt.Errorf("invalid scope for prod-map command: %w", err)
-	}
-	if org_flag != "" && enterprise_flag != "" {
-		return fmt.Errorf("--org and --enterprise cannot be used together")
+	if err := ValidateScope(repo_flag, org_flag, enterprise_flag); err != nil {
+		return err
 	}
 	if prLimitFlag < 0 || tagLimitFlag < 0 || releaseLimitFlag < 0 || repoLimitFlag < 0 || orgLimitFlag < 0 {
 		return fmt.Errorf("limits must be non-negative")
@@ -138,6 +124,14 @@ func runProdMap() error {
 }
 
 func discoverRepositories() ([]repositoryRef, error) {
+	if repo_flag != "" {
+		owner, name, err := parseRepoFlag(repo_flag)
+		if err != nil {
+			return nil, err
+		}
+		return []repositoryRef{{Owner: owner, Name: name}}, nil
+	}
+
 	if org_flag != "" {
 		limit := repoLimitFlag
 		if limit == 0 {
@@ -192,6 +186,16 @@ func discoverRepositories() ([]repositoryRef, error) {
 	}
 
 	return repositories, nil
+}
+
+// parseRepoFlag splits an owner/name repository reference, rejecting anything
+// that is not exactly two non-empty, slash-separated parts.
+func parseRepoFlag(value string) (string, string, error) {
+	parts := strings.SplitN(value, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("--repo must be in owner/name format, got %q", value)
+	}
+	return parts[0], parts[1], nil
 }
 
 func collectRepositoryProductionSignals(repo repositoryRef) (repoProductionSignals, error) {

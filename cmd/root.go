@@ -7,45 +7,54 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Persistent flags shared across every subcommand.
+// Flags that scope the command to a single repository, organization, or
+// enterprise, plus the host every API call targets.
 var (
 	enterprise_flag string
 	org_flag        string
+	repo_flag       string
 	hostname_flag   string
-	limit_flag      int
 )
 
-// RootCmd is the base command for the prod-map extension.
+// RootCmd is the base command for the prod-map extension. It scans the selected
+// scope and detects production branch/tag/release patterns directly, so there
+// are no subcommands to disambiguate.
 var RootCmd = &cobra.Command{
-	Use:   "prod-map <subcommand> [flags]",
+	Use:   "prod-map [flags]",
 	Short: "Map production maintenance patterns across GitHub repositories",
 	Long: `prod-map inspects default branches, pull request target branches, tags,
-and releases across an organization or enterprise, classifies each repository
-into a production-maintenance pattern, and writes a detailed CSV report.
+and releases across a repository, organization, or enterprise, classifies each
+repository into a production-maintenance pattern, and writes a detailed CSV report.
+
+Scope every run to exactly one of --repo, --org, or --enterprise.
 
 It is built with:
   - spf13/cobra   for subcommands and flags
   - pterm/pterm   for terminal UI (spinners, progress bars, tables)
   - cli/go-gh     for GitHub API calls (GraphQL preferred)`,
+	Example: `  gh prod-map --repo github/docs
+  gh prod-map --org github --repo-limit 200 --csv-out prod-map.csv
+  gh prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai`,
 	// pterm renders errors below; let cobra stay quiet so they are not printed twice.
 	SilenceErrors: true,
 	SilenceUsage:  true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runProdMap()
+	},
 }
 
 func _root() error {
 	RootCmd.CompletionOptions.DisableDefaultCmd = true
 
-	RootCmd.PersistentFlags().StringVarP(&enterprise_flag, "enterprise", "e", "", "GitHub Enterprise slug (e.g., github)")
-	RootCmd.PersistentFlags().StringVarP(&org_flag, "org", "o", "", "GitHub organization login")
-	RootCmd.PersistentFlags().StringVarP(&hostname_flag, "hostname", "u", "github.com", "GitHub host (e.g., github.example.com for GitHub Enterprise Server)")
-	RootCmd.PersistentFlags().IntVarP(&limit_flag, "limit", "L", 30, "Maximum number of results to fetch")
+	RootCmd.Flags().StringVarP(&repo_flag, "repo", "r", "", "GitHub repository (owner/name)")
+	RootCmd.Flags().StringVarP(&org_flag, "org", "o", "", "GitHub organization login")
+	RootCmd.Flags().StringVarP(&enterprise_flag, "enterprise", "e", "", "GitHub Enterprise slug (e.g., github)")
+	RootCmd.Flags().StringVarP(&hostname_flag, "hostname", "u", "github.com", "GitHub host (e.g., github.example.com for GitHub Enterprise Server)")
 
-	// Commands are scoped to one of these, never both.
-	RootCmd.MarkFlagsMutuallyExclusive("enterprise", "org")
+	registerProdMapFlags(RootCmd)
 
-	RootCmd.AddCommand(orgsCmd)
-	RootCmd.AddCommand(reposCmd)
-	RootCmd.AddCommand(prodMapCmd)
+	// A run is scoped to exactly one of these, never more than one.
+	RootCmd.MarkFlagsMutuallyExclusive("repo", "org", "enterprise")
 
 	return RootCmd.Execute()
 }
