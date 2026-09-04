@@ -126,10 +126,21 @@ func RenderTable(header []string, rows [][]string) error {
 // Flag validation
 // -----------------------------------------------------------------------------
 
-// ValidateScope ensures exactly one of --org or --enterprise was provided.
-func ValidateScope(org, enterprise string) error {
-	if org == "" && enterprise == "" {
-		return fmt.Errorf("either --org or --enterprise is required")
+// ValidateScope ensures exactly one of --repo, --org, or --enterprise was
+// provided. Cobra also marks these mutually exclusive, so the "more than one"
+// branch is defense in depth.
+func ValidateScope(repo, org, enterprise string) error {
+	provided := 0
+	for _, value := range []string{repo, org, enterprise} {
+		if value != "" {
+			provided++
+		}
+	}
+	if provided == 0 {
+		return fmt.Errorf("one of --repo, --org, or --enterprise is required")
+	}
+	if provided > 1 {
+		return fmt.Errorf("--repo, --org, and --enterprise are mutually exclusive")
 	}
 	return nil
 }
