@@ -21,17 +21,7 @@ var (
 // are no subcommands to disambiguate.
 var RootCmd = &cobra.Command{
 	Use:   "prod-map [flags]",
-	Short: "Map production maintenance patterns across GitHub repositories",
-	Long: `prod-map inspects default branches, pull request target branches, tags,
-and releases across a repository, organization, or enterprise, classifies each
-repository into a production-maintenance pattern, and writes a detailed CSV report.
-
-Scope every run to exactly one of --repo, --org, or --enterprise.
-
-It is built with:
-  - spf13/cobra   for subcommands and flags
-  - pterm/pterm   for terminal UI (spinners, progress bars, tables)
-  - cli/go-gh     for GitHub API calls (GraphQL preferred)`,
+	Short: "Map likely production code patterns across GitHub repositories",
 	Example: `  gh prod-map --repo github/docs
   gh prod-map --org github --repo-limit 200 --csv-out prod-map.csv
   gh prod-map --enterprise github --org-limit 0 --repo-limit 0 --ai`,
