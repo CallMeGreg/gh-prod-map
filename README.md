@@ -1,7 +1,7 @@
 # gh-prod-map
 
 A precompiled [GitHub CLI](https://cli.github.com) extension, written in Go, that maps how teams
-manage production across many repositories. It inspects default branches, pull request target
+manage production code across many repositories. It inspects default branches, pull request target
 branches, tags, and releases, then classifies each repository into a production-maintenance pattern
 and writes a detailed report.
 
