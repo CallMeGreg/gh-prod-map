@@ -27,6 +27,17 @@ var (
 	aiModelFlag      string
 )
 
+const (
+	// signalPageSize is how many repositories are requested per page when
+	// collecting production signals inline. Kept modest because each node also
+	// pulls tags, releases, and a page of pull requests.
+	signalPageSize = 25
+	// prPageSize is the GraphQL maximum page size for pull requests.
+	prPageSize = 100
+	// unlimitedRepoBudget is the sentinel used when no repo/org limit is set.
+	unlimitedRepoBudget = 1000000
+)
+
 type repositoryRef struct {
 	Owner string
 	Name  string
@@ -74,27 +85,14 @@ func runProdMap() error {
 		return fmt.Errorf("limits must be non-negative")
 	}
 
-	repos, err := discoverRepositories()
+	findings, err := collectAllProductionSignals()
 	if err != nil {
 		return err
 	}
-	if len(repos) == 0 {
+	if len(findings) == 0 {
 		PrintWarning("No repositories discovered for the selected scope")
 		return nil
 	}
-
-	progress, _ := pterm.DefaultProgressbar.WithTitle("Collecting production signals").WithTotal(len(repos)).Start()
-	findings := make([]repoProductionSignals, 0, len(repos))
-	for _, repo := range repos {
-		signals, collectErr := collectRepositoryProductionSignals(repo)
-		if collectErr != nil {
-			progress.Stop()
-			return fmt.Errorf("collecting production signals for %s/%s: %w", repo.Owner, repo.Name, collectErr)
-		}
-		findings = append(findings, signals)
-		progress.Increment()
-	}
-	progress.Stop()
 
 	stats := buildSummaryStats(findings)
 	if err := renderStats(stats); err != nil {
@@ -123,34 +121,48 @@ func runProdMap() error {
 	return nil
 }
 
-func discoverRepositories() ([]repositoryRef, error) {
-	if repo_flag != "" {
-		owner, name, err := parseRepoFlag(repo_flag)
-		if err != nil {
-			return nil, err
-		}
-		return []repositoryRef{{Owner: owner, Name: name}}, nil
+// collectAllProductionSignals gathers production signals for the selected scope.
+// A single GraphQL client is shared across the whole run. For --org and
+// --enterprise the repository traversal and the signal collection are folded
+// into one paginated query per page, avoiding a separate metadata round-trip
+// per repository.
+func collectAllProductionSignals() ([]repoProductionSignals, error) {
+	client, err := NewGraphQLClient(hostname_flag)
+	if err != nil {
+		return nil, fmt.Errorf("creating GraphQL client: %w", err)
 	}
 
-	if org_flag != "" {
+	switch {
+	case repo_flag != "":
+		owner, name, parseErr := parseRepoFlag(repo_flag)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		signals, collectErr := collectRepositoryProductionSignals(client, repositoryRef{Owner: owner, Name: name})
+		if collectErr != nil {
+			return nil, fmt.Errorf("collecting production signals for %s/%s: %w", owner, name, collectErr)
+		}
+		return []repoProductionSignals{signals}, nil
+
+	case org_flag != "":
 		limit := repoLimitFlag
 		if limit == 0 {
-			limit = 1000000
+			limit = unlimitedRepoBudget
 		}
-		repos, err := ListOrganizationRepositories(org_flag, hostname_flag, limit)
-		if err != nil {
-			return nil, fmt.Errorf("listing repositories for organization %q: %w", org_flag, err)
-		}
-		result := make([]repositoryRef, 0, len(repos))
-		for _, repo := range repos {
-			result = append(result, repositoryRef{Owner: org_flag, Name: repo.Name})
-		}
-		return result, nil
-	}
+		return collectOrgRepositoryProductionSignals(client, org_flag, hostname_flag, limit)
 
+	default:
+		return collectEnterpriseProductionSignals(client)
+	}
+}
+
+// collectEnterpriseProductionSignals walks every organization in an enterprise
+// and collects signals per organization, honoring the shared --repo-limit
+// budget across organizations.
+func collectEnterpriseProductionSignals(client graphqlDoer) ([]repoProductionSignals, error) {
 	orgLimit := orgLimitFlag
 	if orgLimit == 0 {
-		orgLimit = 1000000
+		orgLimit = unlimitedRepoBudget
 	}
 
 	orgs, err := ListEnterpriseOrganizations(enterprise_flag, hostname_flag, orgLimit)
@@ -160,9 +172,9 @@ func discoverRepositories() ([]repositoryRef, error) {
 
 	limit := repoLimitFlag
 	remaining := repoLimitFlag
-	repositories := make([]repositoryRef, 0)
+	findings := make([]repoProductionSignals, 0)
 	for _, org := range orgs {
-		fetchLimit := 1000000
+		fetchLimit := unlimitedRepoBudget
 		if limit > 0 {
 			if remaining <= 0 {
 				break
@@ -170,22 +182,159 @@ func discoverRepositories() ([]repositoryRef, error) {
 			fetchLimit = remaining
 		}
 
-		repos, listErr := ListOrganizationRepositories(org.Login, hostname_flag, fetchLimit)
-		if listErr != nil {
-			return nil, fmt.Errorf("listing repositories for organization %q: %w", org.Login, listErr)
+		orgFindings, collectErr := collectOrgRepositoryProductionSignals(client, org.Login, hostname_flag, fetchLimit)
+		if collectErr != nil {
+			return nil, collectErr
 		}
-		for _, repo := range repos {
-			repositories = append(repositories, repositoryRef{Owner: org.Login, Name: repo.Name})
-			if limit > 0 {
-				remaining--
-				if remaining <= 0 {
-					break
-				}
+		findings = append(findings, orgFindings...)
+		if limit > 0 {
+			remaining -= len(orgFindings)
+			if remaining <= 0 {
+				break
 			}
 		}
 	}
 
-	return repositories, nil
+	return findings, nil
+}
+
+// collectOrgRepositoryProductionSignals pages an organization's repositories and
+// extracts default branch, tags, releases, and the first page of pull request
+// base branches inline. Repositories whose PR sample exceeds a single page are
+// topped up with a follow-up pagination pass continuing from the inline cursor.
+func collectOrgRepositoryProductionSignals(client graphqlDoer, org, hostname string, limit int) ([]repoProductionSignals, error) {
+	if org == "" {
+		return nil, fmt.Errorf("organization login is required")
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	prFirst := prLimitFlag
+	if prFirst > prPageSize {
+		prFirst = prPageSize
+	}
+	if prFirst < 1 {
+		// GraphQL requires first >= 1; the single node is ignored when PR
+		// sampling is disabled (--pr-limit 0).
+		prFirst = 1
+	}
+
+	const query = `query($login: String!, $first: Int!, $endCursor: String, $tagFirst: Int!, $releaseFirst: Int!, $prFirst: Int!) {
+		organization(login: $login) {
+			repositories(first: $first, after: $endCursor, orderBy: {field: NAME, direction: ASC}) {
+				totalCount
+				nodes {
+					name
+					defaultBranchRef {
+						name
+					}
+					refs(refPrefix: "refs/tags/", first: $tagFirst, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {
+						totalCount
+						nodes {
+							name
+						}
+					}
+					releases(first: $releaseFirst, orderBy: {field: CREATED_AT, direction: DESC}) {
+						totalCount
+						nodes {
+							name
+							tagName
+							publishedAt
+						}
+					}
+					pullRequests(first: $prFirst, states: [OPEN, CLOSED, MERGED], orderBy: {field: UPDATED_AT, direction: DESC}) {
+						nodes {
+							baseRefName
+						}
+						pageInfo {
+							hasNextPage
+							endCursor
+						}
+					}
+				}
+				pageInfo {
+					hasNextPage
+					endCursor
+				}
+			}
+		}
+	}`
+
+	var (
+		findings  []repoProductionSignals
+		endCursor *string
+		progress  *pterm.ProgressbarPrinter
+	)
+
+	for {
+		first := signalPageSize
+		if r := limit - len(findings); r < first {
+			first = r
+		}
+
+		variables := map[string]interface{}{
+			"login":        org,
+			"first":        first,
+			"endCursor":    endCursor,
+			"tagFirst":     maxInt(tagLimitFlag, 1),
+			"releaseFirst": maxInt(releaseLimitFlag, 1),
+			"prFirst":      prFirst,
+		}
+
+		var response struct {
+			Organization struct {
+				Repositories struct {
+					TotalCount int
+					Nodes      []repoSignalNode
+					PageInfo   struct {
+						HasNextPage bool
+						EndCursor   string
+					}
+				}
+			}
+		}
+
+		if err := DoGraphQLWithRateLimitRetry(client, hostname, query, variables, &response); err != nil {
+			if progress != nil {
+				progress.Stop()
+			}
+			return nil, fmt.Errorf("collecting production signals for organization %q: %w", org, err)
+		}
+
+		if progress == nil {
+			target := response.Organization.Repositories.TotalCount
+			if limit < target {
+				target = limit
+			}
+			progress, _ = pterm.DefaultProgressbar.WithTotal(target).WithTitle(fmt.Sprintf("Collecting production signals: %s", org)).Start()
+		}
+
+		for _, node := range response.Organization.Repositories.Nodes {
+			signals, err := signalsFromRepoNode(client, org, node)
+			if err != nil {
+				progress.Stop()
+				return nil, err
+			}
+			findings = append(findings, signals)
+			progress.Increment()
+			if len(findings) >= limit {
+				progress.Stop()
+				return findings, nil
+			}
+		}
+
+		if !response.Organization.Repositories.PageInfo.HasNextPage {
+			break
+		}
+		cursor := response.Organization.Repositories.PageInfo.EndCursor
+		endCursor = &cursor
+	}
+
+	if progress != nil {
+		progress.Stop()
+	}
+	return findings, nil
 }
 
 // parseRepoFlag splits an owner/name repository reference, rejecting anything
@@ -198,12 +347,7 @@ func parseRepoFlag(value string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func collectRepositoryProductionSignals(repo repositoryRef) (repoProductionSignals, error) {
-	client, err := NewGraphQLClient(hostname_flag)
-	if err != nil {
-		return repoProductionSignals{}, fmt.Errorf("creating GraphQL client: %w", err)
-	}
-
+func collectRepositoryProductionSignals(client graphqlDoer, repo repositoryRef) (repoProductionSignals, error) {
 	const metadataQuery = `query($owner: String!, $name: String!, $tagFirst: Int!, $releaseFirst: Int!) {
 		repository(owner: $owner, name: $name) {
 			defaultBranchRef {
@@ -298,15 +442,112 @@ func collectRepositoryProductionSignals(repo repositoryRef) (repoProductionSigna
 	return signals, nil
 }
 
-func collectPRBaseBranchCounts(client interface {
-	Do(string, map[string]interface{}, interface{}) error
-}, owner, repo string) (map[string]int, int, error) {
+// repoSignalNode mirrors the repository fields fetched inline during the
+// organization traversal in collectOrgRepositoryProductionSignals.
+type repoSignalNode struct {
+	Name             string
+	DefaultBranchRef *struct {
+		Name string
+	}
+	Refs struct {
+		TotalCount int
+		Nodes      []struct {
+			Name string
+		}
+	}
+	Releases struct {
+		TotalCount int
+		Nodes      []struct {
+			Name        string
+			TagName     string
+			PublishedAt string
+		}
+	}
+	PullRequests struct {
+		Nodes []struct {
+			BaseRefName string
+		}
+		PageInfo struct {
+			HasNextPage bool
+			EndCursor   string
+		}
+	}
+}
+
+// signalsFromRepoNode converts an inline repository node into production
+// signals. The first page of pull requests arrives with the node; when the
+// configured --pr-limit exceeds one page and more pages exist, it continues
+// paginating from the inline cursor.
+func signalsFromRepoNode(client graphqlDoer, owner string, node repoSignalNode) (repoProductionSignals, error) {
+	counts := make(map[string]int)
+	total := 0
+	if prLimitFlag > 0 {
+		for _, pr := range node.PullRequests.Nodes {
+			if pr.BaseRefName == "" {
+				continue
+			}
+			counts[pr.BaseRefName]++
+			total++
+			if total >= prLimitFlag {
+				break
+			}
+		}
+		if total < prLimitFlag && node.PullRequests.PageInfo.HasNextPage {
+			cursor := node.PullRequests.PageInfo.EndCursor
+			var err error
+			counts, total, err = collectPRBaseBranchCountsFrom(client, owner, node.Name, counts, total, &cursor)
+			if err != nil {
+				return repoProductionSignals{}, err
+			}
+		}
+	}
+
+	topPRBranch, topCount := topBranchFromCounts(counts)
+
+	recentTags := make([]string, 0, len(node.Refs.Nodes))
+	for _, tag := range node.Refs.Nodes {
+		recentTags = append(recentTags, tag.Name)
+	}
+
+	var recentRelease *releaseSignal
+	if len(node.Releases.Nodes) > 0 {
+		n := node.Releases.Nodes[0]
+		recentRelease = &releaseSignal{Name: n.Name, TagName: n.TagName, PublishedAt: n.PublishedAt}
+	}
+
+	defaultBranch := "-"
+	if node.DefaultBranchRef != nil && node.DefaultBranchRef.Name != "" {
+		defaultBranch = node.DefaultBranchRef.Name
+	}
+
+	signals := repoProductionSignals{
+		Owner:              owner,
+		Repository:         node.Name,
+		DefaultBranch:      defaultBranch,
+		TopPRBranch:        topPRBranch,
+		TopPRBranchCount:   topCount,
+		SampledPRCount:     total,
+		TotalTagCount:      node.Refs.TotalCount,
+		RecentTags:         recentTags,
+		TotalReleaseCount:  node.Releases.TotalCount,
+		RecentRelease:      recentRelease,
+		TargetBranchCounts: counts,
+	}
+	signals.ProductionPattern = classifyProductionPattern(signals)
+	return signals, nil
+}
+
+func collectPRBaseBranchCounts(client graphqlDoer, owner, repo string) (map[string]int, int, error) {
 	if prLimitFlag == 0 {
 		return map[string]int{}, 0, nil
 	}
+	return collectPRBaseBranchCountsFrom(client, owner, repo, make(map[string]int), 0, nil)
+}
 
-	counts := make(map[string]int)
-	total := 0
+// collectPRBaseBranchCountsFrom pages pull request base branches starting from
+// endCursor, accumulating into the provided counts/total. Passing a nil cursor
+// with empty counts collects from the first page.
+func collectPRBaseBranchCountsFrom(client graphqlDoer, owner, repo string, counts map[string]int, total int, endCursor *string) (map[string]int, int, error) {
 	const query = `query($owner: String!, $name: String!, $first: Int!, $endCursor: String) {
 		repository(owner: $owner, name: $name) {
 			pullRequests(first: $first, after: $endCursor, states: [OPEN, CLOSED, MERGED], orderBy: {field: UPDATED_AT, direction: DESC}) {
@@ -321,9 +562,8 @@ func collectPRBaseBranchCounts(client interface {
 		}
 	}`
 
-	var endCursor *string
 	for total < prLimitFlag {
-		pageSize := 100
+		pageSize := prPageSize
 		if remaining := prLimitFlag - total; remaining < pageSize {
 			pageSize = remaining
 		}
