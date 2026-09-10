@@ -28,11 +28,15 @@ func NewRESTClient(hostname string) (*api.RESTClient, error) {
 	return api.NewRESTClient(api.ClientOptions{Host: hostname})
 }
 
+// graphqlDoer is the minimal GraphQL client surface the collection helpers
+// depend on. *api.GraphQLClient satisfies it, and tests can substitute a fake.
+type graphqlDoer interface {
+	Do(string, map[string]interface{}, interface{}) error
+}
+
 // DoGraphQLWithRateLimitRetry executes a GraphQL query and retries on primary
 // rate-limit errors by waiting until reset time from the rate-limit endpoint.
-func DoGraphQLWithRateLimitRetry(client interface {
-	Do(string, map[string]interface{}, interface{}) error
-}, hostname, query string, variables map[string]interface{}, out interface{}) error {
+func DoGraphQLWithRateLimitRetry(client graphqlDoer, hostname, query string, variables map[string]interface{}, out interface{}) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if err := client.Do(query, variables, out); err != nil {

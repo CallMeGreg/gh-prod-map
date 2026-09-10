@@ -110,6 +110,11 @@ heuristic summary.
 
 - Every GitHub API call goes through [cli/go-gh](https://github.com/cli/go-gh).
 - **Prefer the GraphQL API over REST** whenever both expose the same data to avoid rate limits and improve speed.
+- For `--org` and `--enterprise`, signal collection is **folded into the repository
+  traversal**: each page of `organization.repositories` fetches the default branch,
+  tags, releases, and the first page of pull request base branches inline, instead
+  of issuing a separate metadata request per repository. Repositories with more
+  sampled pull requests than fit in one page are topped up with follow-up requests.
 - Listing the organizations in an enterprise **always uses GraphQL** (REST cannot do it).
 - Commands pass the `--hostname` value into the client so they work against GitHub.com and GitHub
   Enterprise Server.
