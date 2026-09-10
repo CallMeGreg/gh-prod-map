@@ -110,5 +110,6 @@ jobs:
       
       - uses: cli/gh-extension-precompile@76961aa3bd1123d0a6fd42d0a41aca0696937c39 # v2.2.0
         with:
+          build_script_override: script/build-release.sh
           go_version_file: go.mod
           generate_attestations: true
