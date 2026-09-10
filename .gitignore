@@ -20,3 +20,6 @@ go.work
 # Executable
 /gh-prod-map
 /gh-prod-map.exe
+
+# Release build output
+/dist/

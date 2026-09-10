@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/cli/go-gh/v2 v2.13.0
 	github.com/github/copilot-sdk/go v1.0.13-preview.4
+	github.com/klauspost/compress v1.18.3
 )
 
 require (
@@ -48,3 +49,5 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+tool github.com/github/copilot-sdk/go/cmd/bundler

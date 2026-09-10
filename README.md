@@ -93,6 +93,26 @@ Pass `--ai` to run optional [Copilot SDK](https://github.com/github/copilot-sdk)
 buckets similar patterns into themes. If the SDK is unavailable, `prod-map` falls back to a local
 heuristic summary.
 
+Release binaries for macOS, Linux, and Windows on `amd64` and `arm64` embed the compatible Copilot
+runtime, so no separate runtime installation is required. The AI analysis still requires an active
+GitHub Copilot entitlement and authentication.
+
+On other release platforms, or when running an unbundled development build, install GitHub Copilot
+CLI and provide its path explicitly:
+
+```sh
+COPILOT_CLI_PATH="$(command -v copilot)" gh prod-map --org github --ai
+```
+
+To create a bundled development build for the current platform:
+
+```sh
+GH_PROD_MAP_BUILD_PLATFORMS="$(go env GOOS)-$(go env GOARCH)" \
+  script/build-release.sh dev
+```
+
+The resulting executable is written to `dist/<os>-<arch>`.
+
 #### Report flags
 
 | Flag | Default | Description |
